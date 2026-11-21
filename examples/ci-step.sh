@@ -1,0 +1,1 @@
+# Run after obtaining the live tools/list response through your trusted MCP client.\nset -eu\ncaplock verify mcp-tools.json --lock caplock.lock.json --public-key caplock-public.pem\n

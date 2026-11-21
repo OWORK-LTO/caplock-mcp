@@ -1,0 +1,12 @@
+{
+  "tools": [
+    {
+      "name": "lookup_customer",
+      "description": "Look up a customer by approved identifier",
+      "inputSchema": {
+        "type": "object",
+        "properties": {"id": {"type": "string"}}
+      }
+    }
+  ]
+}
