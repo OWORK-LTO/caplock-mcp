@@ -72,6 +72,13 @@ def _encode(message: dict[str, Any]) -> bytes:
     return json.dumps(message, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8") + b"\n"
 
 
+# Server-initiated requests that act on the host or the user's model/context.
+# Denied by default: a compromised server could otherwise ask the host to run
+# model sampling, prompt the user, or enumerate local roots outside the signed
+# tool inventory. `ping` is liveness only and always relayed.
+ALLOWED_SERVER_REQUESTS = frozenset({"ping"})
+
+
 def _error(request_id: Any, message: str, code: int = -32091) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
 
@@ -95,7 +102,8 @@ class StdioProxy:
 
     def __init__(self, command: list[str], lock: Path, public_key: Path,
                  server_id: str, trusted_key_fingerprint: str, timeout: float = 120.0,
-                 state: Path | None = None, audit: Path | None = None, bootstrap: bool = False):
+                 state: Path | None = None, audit: Path | None = None, bootstrap: bool = False,
+                 allow_server_requests: bool = False):
         if not command:
             raise ProxyError("upstream command is required")
         self.command = command
@@ -109,6 +117,7 @@ class StdioProxy:
         self.state = state or (Path.home() / ".local" / "state" / "caplock" / f"{safe_id}.json")
         self.audit = audit or self.state.with_suffix(".audit.jsonl")
         self.bootstrap = bootstrap
+        self.allow_server_requests = allow_server_requests
         self.child: subprocess.Popen[bytes] | None = None
         self.events: queue.Queue[tuple[str, bytes | None]] = queue.Queue(maxsize=1024)
         self.write_lock = threading.Lock()
@@ -385,6 +394,11 @@ class StdioProxy:
                 request_key = _id_key(message["id"])
                 if request_key in self.server_requests or request_key in self.pending or request_key in self.discovery or request_key in self.used_ids:
                     raise ProxyError("upstream reused an active JSON-RPC request id")
+                if not self.allow_server_requests and message["method"] not in ALLOWED_SERVER_REQUESTS:
+                    self._audit("server_request_blocked", method=str(message["method"])[:200])
+                    self._send_upstream(_error(message["id"], "server-initiated request blocked by CAPLOCK policy",
+                                               code=-32601))
+                    return
                 self.server_requests.add(request_key)
             self._send_host(message)
             return
@@ -502,6 +516,7 @@ class StdioProxy:
 
 def run_proxy(command: list[str], lock: Path, public_key: Path,
               server_id: str, trusted_key_fingerprint: str, timeout: float = 120.0,
-              state: Path | None = None, audit: Path | None = None, bootstrap: bool = False) -> int:
+              state: Path | None = None, audit: Path | None = None, bootstrap: bool = False,
+              allow_server_requests: bool = False) -> int:
     return StdioProxy(command, lock, public_key, server_id, trusted_key_fingerprint,
-                      timeout, state, audit, bootstrap).run()
+                      timeout, state, audit, bootstrap, allow_server_requests).run()

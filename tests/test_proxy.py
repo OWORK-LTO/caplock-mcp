@@ -91,7 +91,8 @@ def setup(tmp_path: Path, mode: str = "clean"):
     return private, public, lock, server
 
 
-def launch(tmp_path: Path, mode: str, fingerprint: str | None = None, timeout: float = 15.0):
+def launch(tmp_path: Path, mode: str, fingerprint: str | None = None, timeout: float = 15.0,
+           extra: tuple[str, ...] = ()):
     _, public, lock, server = setup(tmp_path, mode)
     env = os.environ.copy()
     env["PYTHONPATH"] = str(Path(__file__).parents[1] / "src")
@@ -100,7 +101,7 @@ def launch(tmp_path: Path, mode: str, fingerprint: str | None = None, timeout: f
          "--public-key", str(public), "--server-id", "test-weather",
          "--trusted-key-fingerprint", fingerprint or public_key_fingerprint(public),
          "--timeout", str(timeout), "--state", str(tmp_path / "state.json"), "--audit", str(tmp_path / "audit.jsonl"),
-         "--bootstrap", "--",
+         "--bootstrap", *extra, "--",
          sys.executable, str(server), mode],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, env=env,
@@ -262,7 +263,7 @@ def test_proxy_rejects_unsolicited_upstream_response_id(tmp_path: Path):
 
 
 def test_proxy_relays_server_initiated_request_and_validates_response_id(tmp_path: Path):
-    proc = launch(tmp_path, "server_request")
+    proc = launch(tmp_path, "server_request", extra=("--allow-server-requests",))
     try:
         assert proc.stdin and proc.stdout
         proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 101, "method": "tools/list"}) + "\n")
@@ -312,6 +313,21 @@ def test_slow_tool_call_times_out_without_killing_session(tmp_path: Path):
         assert proc.poll() is None
         follow = exchange(proc, {"jsonrpc": "2.0", "id": 92, "method": "tools/list"})
         assert follow["id"] == 92 and "result" in follow
+    finally:
+        proc.terminate()
+        proc.wait(timeout=3)
+
+
+def test_server_initiated_requests_are_blocked_by_default(tmp_path: Path):
+    proc = launch(tmp_path, "server_request")
+    assert proc.stdin and proc.stdout
+    try:
+        response = exchange(proc, {"jsonrpc": "2.0", "id": 103, "method": "tools/list"})
+        # The sampling request must never reach the host; the host sees only its own response.
+        assert response["id"] == 103 and "method" not in response
+        assert response["result"]["tools"] == [TOOL]
+        events = [json.loads(x)["event"] for x in (tmp_path / "audit.jsonl").read_text().splitlines()]
+        assert "server_request_blocked" in events
     finally:
         proc.terminate()
         proc.wait(timeout=3)

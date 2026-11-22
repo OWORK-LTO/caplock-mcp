@@ -10,5 +10,3 @@ caplock-private.pem
 caplock.lock.json
 caplock-state*.json
 *.audit.jsonl
-.venv-check/
-.vscode/

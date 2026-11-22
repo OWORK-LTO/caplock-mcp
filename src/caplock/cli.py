@@ -51,6 +51,8 @@ def parser() -> argparse.ArgumentParser:
     proxy.add_argument("--state", type=Path, help="Protected local anti-rollback state file.")
     proxy.add_argument("--audit", type=Path, help="Append-only local JSONL audit log.")
     proxy.add_argument("--bootstrap", action="store_true", help="Explicitly trust-anchor a sequence >1 baseline when local state is absent.")
+    proxy.add_argument("--allow-server-requests", action="store_true",
+                       help="Relay server-initiated requests (sampling, elicitation, roots). Denied by default.")
     proxy.add_argument("upstream", nargs=argparse.REMAINDER,
                        help="Upstream server command, preceded by --")
 
@@ -85,7 +87,7 @@ def main() -> int:
                 raise CaplockError("--timeout must be greater than zero.")
             return run_proxy(command, args.lock, args.public_key, args.server_id,
                              args.trusted_key_fingerprint, args.timeout,
-                             args.state, args.audit, args.bootstrap)
+                             args.state, args.audit, args.bootstrap, args.allow_server_requests)
 
         if args.command == "verify":
             result = verify_lock(args.manifest, args.lock, args.public_key)

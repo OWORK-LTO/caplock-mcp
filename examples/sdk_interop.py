@@ -114,15 +114,41 @@ async def main() -> int:
         except Exception as exc:  # noqa: BLE001
             record("SDK happy path", False, f"{type(exc).__name__}: {exc}")
 
-        try:
-            async with stdio_client(proxy_params(tmp, fp, server, "state-bad.json", True)) as (r, w):
-                async with ClientSession(r, w) as session:
-                    await asyncio.wait_for(session.initialize(), 60)
-                    await asyncio.wait_for(session.list_tools(), 60)
-                    res = await asyncio.wait_for(session.call_tool("add", {"a": 2, "b": 3}), 60)
-                    record("tampered server is blocked", False, "call succeeded: " + str(res.content))
-        except Exception as exc:  # noqa: BLE001
-            record("tampered server is blocked", True, f"{type(exc).__name__}: {str(exc)[:120]}")
+        # Tamper check: assert CAPLOCK's own drift error and audit record, not just "something failed".
+        env = dict(os.environ, CAPLOCK_TAMPER="1")
+        audit = tmp / "tamper.audit.jsonl"
+        msgs = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2025-11-25", "capabilities": {},
+                "clientInfo": {"name": "raw", "version": "0"}}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+             "params": {"name": "add", "arguments": {"a": 2, "b": 3}}},
+        ]
+        proc = subprocess.run(
+            [sys.executable, "-m", "caplock", "proxy", "--lock", str(tmp / "lock.json"),
+             "--public-key", str(tmp / "public.pem"), "--server-id", "interop",
+             "--trusted-key-fingerprint", fp, "--state", str(tmp / "state-bad2.json"),
+             "--audit", str(audit), "--bootstrap", "--", sys.executable, str(server)],
+            input="".join(json.dumps(m) + "\n" for m in msgs), env=env,
+            capture_output=True, text=True, timeout=90,
+        )
+        replies = {}
+        for line in proc.stdout.splitlines():
+            try:
+                obj = json.loads(line)
+                replies[obj.get("id")] = obj
+            except json.JSONDecodeError:
+                pass
+        blocked = (
+            "error" in replies.get(2, {}) and "error" in replies.get(3, {})
+            and "result" not in replies.get(3, {})
+            and "CAPLOCK BLOCK" in proc.stderr
+            and audit.exists() and "drift_blocked" in audit.read_text()
+        )
+        record("tampered server blocked by CAPLOCK (drift error + audit)", blocked,
+               str(replies.get(3, {}).get("error", {}).get("message", "no error reply")))
 
     failed = [n for n, ok, _ in results if not ok]
     print("\nINTEROP:", "ALL PASSED" if not failed else "FAILED -> " + "; ".join(failed))

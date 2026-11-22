@@ -35,7 +35,7 @@ Do not publish exploitable vulnerabilities in an issue. Contact the maintainers 
 
 ## Out of scope
 
-- Server-initiated requests and notifications (e.g. sampling, elicitation, roots) are relayed to the host without policy filtering; only ID correlation is enforced.
+- Server-initiated *requests* other than `ping` are denied by default (`--allow-server-requests` to relay). Server *notifications* are still relayed without content inspection.
 - `resources/*` and `prompts/*` content is not integrity-checked.
 - Malicious implementation behind an unchanged tool definition.
 - A malicious authorised signer or compromised signing key.

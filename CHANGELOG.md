@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 — Server-initiated request policy (behavior change)
+
+- **Breaking default:** server-initiated requests other than `ping` (e.g. `sampling/createMessage`, `elicitation/create`, `roots/list`) are no longer relayed to the host. The proxy answers the server with JSON-RPC error -32601 and writes a `server_request_blocked` audit record. Use `--allow-server-requests` to restore relaying for servers that legitimately need them.
+- Interop check now asserts CAPLOCK's own drift error, stderr message and audit record for a tampered server (not just any failure).
+- Added a regression test for the default-deny policy (27 tests).
+
 ## 0.3.2 — Envelope and timeout hardening
 
 - `tools/list` results returned to the host now contain only the verified `tools` array and `nextCursor`; unsigned members (e.g. `instructions`, `_meta`) are dropped.
